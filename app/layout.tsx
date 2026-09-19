@@ -2,6 +2,12 @@ import { Analytics } from '@vercel/analytics/next'
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
+// Nonce-based CSP (see proxy.ts) requires dynamic rendering so Next can inject
+// the per-request nonce into its script tags. This app is a client-rendered SPA
+// that fetches its data at runtime, so forcing dynamic rendering has negligible
+// cost while enabling a strict, no-'unsafe-inline' script policy.
+export const dynamic = 'force-dynamic'
+
 export const metadata: Metadata = {
   title: 'Academy Manager · Bright Future Academy',
   description: 'Simple, calm academy management for tuition-centre owners and staff.',
