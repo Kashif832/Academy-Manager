@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
 import { canManageAcademy } from '@/lib/permissions'
+import { getRequestId, jsonError } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { createStudentSchema } from '@/lib/schemas'
 
 function currentMonthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
@@ -45,42 +48,31 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
   if (!canManageAcademy(user.role)) {
-    return NextResponse.json({ error: 'Only owners and admins can add students.' }, { status: 403 })
+    return jsonError(403, 'Only owners and admins can add students.', requestId)
   }
 
-  const body = await request.json().catch(() => null)
-  const fullName = typeof body?.fullName === 'string' ? body.fullName.trim() : ''
-  const parentName = typeof body?.parentName === 'string' ? body.parentName.trim() : ''
-  const parentPhone = typeof body?.parentPhone === 'string' ? body.parentPhone.trim() : ''
-  const parentEmail = typeof body?.parentEmail === 'string' && body.parentEmail.trim() ? body.parentEmail.trim() : null
-  const classId = typeof body?.classId === 'string' ? body.classId : ''
-  const monthlyFee = Number(body?.monthlyFee)
+  const parsed = await validateBody(request, createStudentSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const { fullName, parentName, parentPhone, classId, monthlyFee } = parsed.data
+  const parentEmail = parsed.data.parentEmail?.trim() || null
 
   let dateOfBirth: Date | null = null
-  if (typeof body?.dateOfBirth === 'string' && body.dateOfBirth.trim()) {
-    const parsed = new Date(body.dateOfBirth)
-    if (Number.isNaN(parsed.getTime())) {
-      return NextResponse.json({ error: 'Date of birth is not a valid date.' }, { status: 400 })
-    }
-    dateOfBirth = parsed
-  }
-
-  if (!fullName || !parentName || !parentPhone || !classId) {
-    return NextResponse.json({ error: 'Student name, parent name, parent phone and class are required.' }, { status: 400 })
-  }
-  if (!Number.isFinite(monthlyFee) || monthlyFee <= 0) {
-    return NextResponse.json({ error: 'Monthly fee must be a positive number.' }, { status: 400 })
+  if (parsed.data.dateOfBirth?.trim()) {
+    const d = new Date(parsed.data.dateOfBirth)
+    if (Number.isNaN(d.getTime())) return jsonError(400, 'Date of birth is not a valid date.', requestId)
+    dateOfBirth = d
   }
 
   const cls = await prisma.class.findFirst({ where: { id: classId, academyId: user.academyId } })
   if (!cls) {
-    return NextResponse.json({ error: 'Selected class was not found.' }, { status: 400 })
+    return jsonError(400, 'Selected class was not found.', requestId)
   }
   if (!cls.isActive) {
-    return NextResponse.json({ error: 'This class is deactivated and cannot accept new students.' }, { status: 400 })
+    return jsonError(400, 'This class is deactivated and cannot accept new students.', requestId)
   }
 
   const now = new Date()

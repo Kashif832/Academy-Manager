@@ -6,42 +6,31 @@ import { getSessionUser } from '@/lib/session'
 import { canManageFinance } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import { computeInvoiceStatus } from '@/lib/fees'
+import { getRequestId, jsonError } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { recordPaymentSchema } from '@/lib/schemas'
 
-const VALID_METHODS = new Set(['CASH', 'BANK_TRANSFER', 'CARD', 'ONLINE'])
 const MONTH_PATTERN = /^(\d{4})-(\d{2})$/
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
   // Financial operation — owners, admins and accountants only.
   if (!canManageFinance(user.role)) {
-    return NextResponse.json({ error: 'Only owners, admins and accountants can record payments.' }, { status: 403 })
+    return jsonError(403, 'Only owners, admins and accountants can record payments.', requestId)
   }
 
-  const body = await request.json().catch(() => null)
-  const invoiceId = typeof body?.invoiceId === 'string' ? body.invoiceId : ''
-  const studentId = typeof body?.studentId === 'string' ? body.studentId : ''
-  const month = typeof body?.month === 'string' ? body.month : ''
-  const amount = Number(body?.amount)
-  const paymentMethod = typeof body?.paymentMethod === 'string' ? body.paymentMethod : ''
+  const parsed = await validateBody(request, recordPaymentSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const invoiceId = parsed.data.invoiceId ?? ''
+  const studentId = parsed.data.studentId ?? ''
+  const month = parsed.data.month ?? ''
+  const amount = parsed.data.amount
+  const paymentMethod = parsed.data.paymentMethod
   // Optional client-supplied idempotency key: retried/double-clicked submissions
   // that carry the same key return the original payment instead of a duplicate.
-  const idempotencyKey = typeof body?.idempotencyKey === 'string' && body.idempotencyKey.trim()
-    ? body.idempotencyKey.trim().slice(0, 100)
-    : null
-
-  if (!invoiceId && !(studentId && month)) {
-    return NextResponse.json({ error: 'An invoice, or a student and month, must be selected.' }, { status: 400 })
-  }
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return NextResponse.json({ error: 'Amount must be a positive number.' }, { status: 400 })
-  }
-  if (amount > 100_000_000) {
-    return NextResponse.json({ error: 'Amount is unreasonably large.' }, { status: 400 })
-  }
-  if (!VALID_METHODS.has(paymentMethod)) {
-    return NextResponse.json({ error: 'Please choose a valid payment method.' }, { status: 400 })
-  }
+  const idempotencyKey = parsed.data.idempotencyKey?.trim() ? parsed.data.idempotencyKey.trim().slice(0, 100) : null
 
   // Idempotency short-circuit: if a payment with this key already exists for
   // this tenant, return it rather than creating a second one.
@@ -66,12 +55,6 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (studentId || !invoiceId) {
-    const monthMatch = month ? MONTH_PATTERN.exec(month) : null
-    if (!invoiceId && !monthMatch) {
-      return NextResponse.json({ error: 'Month must be in YYYY-MM format.' }, { status: 400 })
-    }
-  }
 
   const receiptNumber = `${user.academy.receiptPrefix}-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(2).toString('hex').toUpperCase()}`
 

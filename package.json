@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
     "prisma:seed": "npx tsx prisma/seed.ts",
     "seed:super-admin": "npx tsx scripts/seed-super-admin-demo.ts",
     "create-academy": "npx tsx scripts/create-academy.ts",
@@ -38,10 +39,12 @@
     "react-dom": "^19",
     "shadcn": "^4.8.0",
     "tailwind-merge": "^3.3.1",
-    "tw-animate-css": "^1.4.0"
+    "tw-animate-css": "^1.4.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^24",
