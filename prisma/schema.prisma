@@ -1,0 +1,500 @@
+// Academy Manager — Multi-Tenant Prisma Schema
+// PostgreSQL · UUID primary keys · every business table scoped by academyId.
+// Money uses @db.Decimal(12, 2); genuine date-only fields use @db.Date.
+// Local dev/test/CI run a real PostgreSQL via embedded-postgres — see
+// scripts/pg.mjs and `npm run db:pg:*`.
+
+// ─── Generator & Datasource ───────────────────────────────────────────────────
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum PlanTier {
+  TRIAL
+  BASIC
+  PRO
+}
+
+// Tenant account status, controlled exclusively by the Super Admin. INACTIVE
+// tenants are preserved (never deleted) but blocked from authenticating.
+enum AcademyStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  TEACHER
+  ACCOUNTANT
+}
+
+enum StudentStatus {
+  ACTIVE
+  INACTIVE
+  GRADUATED
+}
+
+enum InvoiceStatus {
+  PENDING
+  PARTIAL
+  PAID
+  OVERDUE
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  ONLINE
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  VISIT_SCHEDULED
+  APPLICATION
+  ACCEPTED
+  ENROLLED
+  LOST
+}
+
+enum SitePostType {
+  NEWS
+  EVENT
+}
+
+// Financial lifecycle state of a payment. COMPLETED is the normal state; VOID
+// (recorded in error) and REFUNDED (money returned) both reverse the payment's
+// effect on the invoice while keeping the record for audit/history.
+enum PaymentStatus {
+  COMPLETED
+  VOID
+  REFUNDED
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model Academy {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  logoUrl     String?
+  phone       String?
+  address     String?
+  description String?
+  planTier    PlanTier  @default(TRIAL)
+  // Platform-level account status — set only via Super Admin. Inactive tenants
+  // are blocked from login but their data is never touched.
+  status      AcademyStatus @default(ACTIVE)
+  trialEndsAt DateTime?
+  // Settings — Finance: receipt numbering prefix (e.g. "RCP" -> "RCP-XXXXXX").
+  receiptPrefix String @default("RCP")
+  // Settings — Communication: override for the fee-reminder message template;
+  // null falls back to the built-in translated default.
+  reminderTemplate String?
+  // Settings — Contact: public WhatsApp number and opening hours, surfaced on
+  // the public website's contact section (kept alongside phone/address rather
+  // than a separate "website settings" record).
+  whatsapp      String?
+  openingHours  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  users             User[]
+  classes           Class[]
+  students          Student[]
+  feeInvoices       FeeInvoice[]
+  feePayments       FeePayment[]
+  attendanceRecords AttendanceRecord[]
+  auditLogs         AuditLog[]
+  site              AcademySite?
+  siteInquiries     SiteInquiry[]
+  sitePosts         SitePost[]
+  planUpgradeRequests PlanUpgradeRequest[]
+  impersonationSessions ImpersonationSession[]
+}
+
+model User {
+  id           String   @id @default(uuid())
+  academyId    String
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         UserRole @default(TEACHER)
+  phone        String?
+  avatarUrl    String?
+  isActive     Boolean  @default(true)
+  // Bumped whenever all of a user's existing sessions must be invalidated
+  // (e.g. after a password change). Session tokens carry the epoch they were
+  // minted at; getSessionUser rejects any token whose epoch is stale.
+  sessionEpoch Int      @default(0)
+  // Public faculty profile — only surfaced on the website when showOnWebsite
+  // is true; never includes phone/email/salary/HR data.
+  showOnWebsite   Boolean @default(false)
+  publicTitle     String?
+  publicBio       String?
+  publicPhotoUrl  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  academy            Academy            @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  taughtClasses      Class[]            @relation("TeacherClass")
+  recordedPayments   FeePayment[]
+  attendanceMarkings AttendanceRecord[]
+  auditLogs          AuditLog[]
+  assignedLeads      SiteInquiry[]      @relation("AssignedLeads")
+  planUpgradeRequests PlanUpgradeRequest[]
+  impersonationSessions ImpersonationSession[]
+
+  @@index([academyId])
+}
+
+model Class {
+  id         String   @id @default(uuid())
+  academyId  String
+  name       String
+  section    String
+  teacherId  String?
+  monthlyFee Decimal @db.Decimal(12, 2)
+  isActive   Boolean  @default(true)
+  // Public academics listing — hidden from the website unless explicitly published.
+  publicVisible     Boolean @default(false)
+  publicDescription String?
+  // Comma-separated subjects taught (informational, shown as tags).
+  publicSubjects    String?
+  // Optional elective subjects with their own monthly fee, selectable in the
+  // public fee estimator. Each item: {"name": string, "monthlyFee": number}.
+  electiveSubjects  Json    @default("[]")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relations
+  academy           Academy            @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  teacher           User?              @relation("TeacherClass", fields: [teacherId], references: [id], onDelete: SetNull)
+  students          Student[]
+  attendanceRecords AttendanceRecord[]
+  leads             SiteInquiry[]
+
+  @@index([academyId])
+}
+
+model Student {
+  id            String        @id @default(uuid())
+  academyId     String
+  classId       String
+  fullName      String
+  parentName    String
+  parentPhone   String
+  parentEmail   String?
+  dateOfBirth   DateTime?     @db.Date
+  admissionDate DateTime      @default(now()) @db.Date
+  status        StudentStatus @default(ACTIVE)
+  monthlyFee    Decimal @db.Decimal(12, 2)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  // Relations
+  academy           Academy            @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  class             Class              @relation(fields: [classId], references: [id], onDelete: Restrict)
+  feeInvoices       FeeInvoice[]
+  attendanceRecords AttendanceRecord[]
+
+  @@index([academyId])
+  @@index([classId])
+}
+
+model FeeInvoice {
+  id         String        @id @default(uuid())
+  academyId  String
+  studentId  String
+  month      String // e.g. "2026-08"
+  amountDue  Decimal       @db.Decimal(12, 2)
+  amountPaid Decimal       @default(0) @db.Decimal(12, 2)
+  status     InvoiceStatus @default(PENDING)
+  dueDate    DateTime      @db.Date
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  // Relations
+  academy  Academy      @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  student  Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  payments FeePayment[]
+
+  @@unique([studentId, month])
+  @@index([academyId])
+  @@index([academyId, status])
+  @@index([studentId])
+}
+
+model FeePayment {
+  id               String        @id @default(uuid())
+  academyId        String
+  invoiceId        String
+  amount           Decimal      @db.Decimal(12, 2)
+  paymentMethod    PaymentMethod
+  receiptNumber    String        @unique
+  // Server-side duplicate/double-submit guard: a client-supplied key that is
+  // unique per tenant, so a retried or double-clicked payment carrying the
+  // same key can never create a second FeePayment row.
+  idempotencyKey   String?
+  // Financial lifecycle. Payments are NEVER deleted — a VOID (recorded in
+  // error) or REFUND (money returned) flips the status and reverses its effect
+  // on the invoice balance, preserving the full historical ledger.
+  status         PaymentStatus @default(COMPLETED)
+  reversedAt     DateTime?
+  reversedByUserId String?
+  reversalReason String?
+  paidAt           DateTime      @default(now())
+  recordedByUserId String
+  createdAt        DateTime      @default(now())
+
+  // Relations
+  academy    Academy    @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  invoice    FeeInvoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  recordedBy User       @relation(fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([academyId, idempotencyKey])
+  @@index([academyId])
+  @@index([academyId, status])
+}
+
+model AttendanceRecord {
+  id             String           @id @default(uuid())
+  academyId      String
+  studentId      String
+  classId        String
+  date           DateTime
+  status         AttendanceStatus
+  markedByUserId String
+  createdAt      DateTime         @default(now())
+
+  // Relations
+  academy  Academy @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  student  Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class    Class   @relation(fields: [classId], references: [id], onDelete: Restrict)
+  markedBy User    @relation(fields: [markedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([studentId, date])
+  @@index([academyId])
+  @@index([academyId, date])
+}
+
+// Public one-page CMS/CRM site — editable only by academies on the PRO
+// (premium / "Tier 3") plan; gated at the API layer, not just the UI.
+// Content lives as structured fields/JSON lists (not a page-builder) so a
+// non-technical academy admin can manage it entirely through simple forms.
+model AcademySite {
+  id           String   @id @default(uuid())
+  academyId    String   @unique
+  tagline      String   @default("")
+  cards        Json     @default("[]")
+  features     Json     @default("[]")
+  // Hero / admissions call-to-action
+  heroTitle        String?
+  heroSubtitle     String?
+  heroImageUrl     String?
+  admissionsOpen   Boolean @default(true)
+  primaryCtaLabel  String  @default("Apply for Admission")
+  secondaryCtaLabel String @default("Book a Visit")
+  // About / mission / principal message
+  aboutBody         String?
+  missionText       String?
+  principalName     String?
+  principalMessage  String?
+  principalPhotoUrl String?
+  // Small JSON content lists — each item is a plain object, kept intentionally
+  // simple (no nested page-builder blocks).
+  testimonials Json @default("[]")
+  faqs         Json @default("[]")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  academy Academy @relation(fields: [academyId], references: [id], onDelete: Cascade)
+}
+
+// A website admissions enquiry IS the CRM lead — one record, not a duplicate
+// "Lead" table, so the website and the admissions pipeline always agree.
+model SiteInquiry {
+  id                String     @id @default(uuid())
+  academyId         String
+  name              String
+  phone             String
+  email             String?
+  message           String?
+  studentName       String?
+  interestedClassId String?
+  source            String     @default("Website")
+  status            LeadStatus @default(NEW)
+  notes             String?
+  nextFollowUpAt    DateTime?
+  assignedToUserId  String?
+  convertedStudentId String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @default(now()) @updatedAt
+
+  // Relations
+  academy         Academy @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  interestedClass Class?  @relation(fields: [interestedClassId], references: [id], onDelete: SetNull)
+  assignedTo      User?   @relation("AssignedLeads", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@index([academyId])
+  @@index([academyId, status])
+}
+
+// News & events — one lightweight model for both, since they share the same
+// shape (title/body/image/date/published) and the only difference is whether
+// event-specific fields are filled in.
+model SitePost {
+  id        String       @id @default(uuid())
+  academyId String
+  type      SitePostType
+  title     String
+  body      String?
+  imageUrl  String?
+  eventDate DateTime?
+  eventTime String?
+  location  String?
+  published Boolean      @default(false)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  // Relations
+  academy Academy @relation(fields: [academyId], references: [id], onDelete: Cascade)
+
+  @@index([academyId])
+  @@index([academyId, type, published])
+}
+
+// Shared audit trail for both tenant-scoped actions (userId set) and
+// platform-level Super Admin actions (superAdminId set). academyId is
+// optional only for the rare platform-wide event with no single tenant
+// target (e.g. a Super Admin login); every tenant-affecting action still
+// always records it.
+model AuditLog {
+  id           String   @id @default(uuid())
+  academyId    String?
+  userId       String?
+  superAdminId String?
+  // First-class actor classification (previously only inside metadata JSON):
+  // USER | SUPER_ADMIN | IMPERSONATED_SUPER_ADMIN | SYSTEM. Nullable so existing
+  // rows remain valid; new rows always set it.
+  actorType    String?
+  // Ties an action to the privileged impersonation session it was performed
+  // under, so "every sensitive action taken while impersonating" is queryable.
+  impersonationSessionId String?
+  action       String
+  entityType   String
+  entityId     String
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  // Relations
+  academy    Academy?    @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  user       User?       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  superAdmin SuperAdmin? @relation(fields: [superAdminId], references: [id], onDelete: SetNull)
+  impersonationSession ImpersonationSession? @relation(fields: [impersonationSessionId], references: [id], onDelete: SetNull)
+
+  @@index([academyId])
+  @@index([superAdminId])
+  @@index([impersonationSessionId])
+}
+
+// A dedicated, server-persisted privileged session created when a Super Admin
+// enters a tenant to manage it. Unlike the previous approach (signing the
+// operator directly into the tenant OWNER account), this row is the source of
+// truth for the acting context: the token in the `impersonation_session` cookie
+// only references this row by id, so ending it, revoking it, letting it expire,
+// or deactivating the Super Admin all cut off access server-side on the very
+// next request — the cookie alone grants nothing.
+model ImpersonationSession {
+  id            String    @id @default(uuid())
+  superAdminId  String
+  academyId     String
+  actingUserId  String
+  actingRole    String
+  startedAt     DateTime  @default(now())
+  expiresAt     DateTime
+  endedAt       DateTime?
+  revokedAt     DateTime?
+  revokedReason String?
+  ipAddress     String?
+  userAgent     String?
+
+  superAdmin SuperAdmin @relation(fields: [superAdminId], references: [id], onDelete: Cascade)
+  academy    Academy    @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  actingUser User       @relation(fields: [actingUserId], references: [id], onDelete: Cascade)
+  auditLogs  AuditLog[]
+
+  @@index([superAdminId])
+  @@index([academyId])
+  @@index([actingUserId])
+}
+
+// Platform-level administrator — architecturally separate from tenant `User`
+// rows. Not a member of any academy; authenticates via a distinct session
+// cookie and has no tenant-scoped data of its own.
+model SuperAdmin {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs      AuditLog[]
+  reviewedPlanRequests PlanUpgradeRequest[]
+  impersonationSessions ImpersonationSession[]
+}
+
+enum PlanRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// A tenant's request to move to a higher subscription tier. Submitting one
+// does NOT change Academy.planTier — only a Super Admin approval does, via
+// the exact same central tier field every other part of the app already
+// reads (lib/tiers.ts), so approval instantly (and only then) unlocks the
+// new tier's features.
+model PlanUpgradeRequest {
+  id               String            @id @default(uuid())
+  academyId        String
+  currentTier      PlanTier
+  requestedTier    PlanTier
+  requestedByUserId String
+  status           PlanRequestStatus @default(PENDING)
+  adminNote        String?
+  reviewedBySuperAdminId String?
+  reviewedAt       DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  academy            Academy     @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  requestedBy        User        @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  reviewedBySuperAdmin SuperAdmin? @relation(fields: [reviewedBySuperAdminId], references: [id], onDelete: SetNull)
+
+  @@index([academyId])
+  @@index([status])
+}

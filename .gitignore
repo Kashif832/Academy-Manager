@@ -1,0 +1,33 @@
+# v0 sandbox internal files
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+.snowflake/
+.v0-trash/
+.vercel/
+
+# Environment variables
+.env
+.env*.local
+
+# Local dev/test credentials — never commit or deploy
+TEST_CREDENTIALS.md
+
+# Local SQLite databases and test artifacts — never commit
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+prisma/dev.db
+tests/integration/.isolation-test.db*
+
+# Common ignores
+node_modules
+.next/
+.DS_Store
+# Embedded PostgreSQL data + snapshots
+.pgdata/
+.pgsnapshot.json
+.pgbackup.dump
+.pgpassword
+.env.sqlite.bak

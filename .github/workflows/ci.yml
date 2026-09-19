@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    # Real PostgreSQL service — integration tests and migrations run against it,
+    # the same engine as production. No SQLite anywhere in the pipeline.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: academy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/academy"
+      TEST_DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/academy_test"
+      SESSION_SECRET: "ci-only-non-secret-session-key-0123456789abcdef"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies (clean, from lockfile)
+        run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Apply migrations to CI database
+        run: npx prisma migrate deploy
+
+      - name: Create + migrate the integration test database
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE academy_test;"
+          DATABASE_URL="$TEST_DATABASE_URL" npx prisma migrate deploy
+
+      - name: Type-check (fails CI on any type error)
+        run: npm run typecheck
+
+      - name: Lint (fails CI on any lint error)
+        run: npm run lint
+
+      - name: Test — unit + PostgreSQL-backed integration
+        run: npm test
+
+      - name: Production build
+        run: npm run build
