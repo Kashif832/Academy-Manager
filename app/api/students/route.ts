@@ -5,6 +5,7 @@ import { canManageAcademy } from '@/lib/permissions'
 import { getRequestId, jsonError } from '@/lib/http'
 import { validateBody } from '@/lib/validation'
 import { createStudentSchema } from '@/lib/schemas'
+import { ensureEnrollment } from '@/lib/enrollment'
 
 function currentMonthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
@@ -116,6 +117,13 @@ export async function POST(request: NextRequest) {
     },
     include: { class: { select: { name: true, section: true } } },
   })
+
+  // Record the opening enrollment for academic history (best-effort, non-fatal).
+  try {
+    await ensureEnrollment(user.academyId, student.id, classId)
+  } catch {
+    /* history is supplementary — never block student creation */
+  }
 
   return NextResponse.json({
     student: {
