@@ -218,6 +218,7 @@ model Student {
   attendanceRecords AttendanceRecord[]
 
   @@index([academyId])
+  @@index([academyId, fullName])
   @@index([classId])
 }
 
@@ -241,6 +242,7 @@ model FeeInvoice {
   @@unique([studentId, month])
   @@index([academyId])
   @@index([academyId, status])
+  @@index([academyId, month])
   @@index([studentId])
 }
 
@@ -274,6 +276,7 @@ model FeePayment {
   @@unique([academyId, idempotencyKey])
   @@index([academyId])
   @@index([academyId, status])
+  @@index([invoiceId, paidAt])
 }
 
 model AttendanceRecord {

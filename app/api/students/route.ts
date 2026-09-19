@@ -10,13 +10,24 @@ function currentMonthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  // Opt-in pagination: ?limit (1..200) + ?page (1-based). Without ?limit the
+  // full list is returned (backward compatible). Pagination bounds the per-
+  // student attendance/invoice sub-selects, which is the cost at large scale.
+  const url = request.nextUrl
+  const limitParam = Number(url.searchParams.get('limit'))
+  const paginated = Number.isFinite(limitParam) && limitParam > 0
+  const limit = paginated ? Math.min(200, Math.max(1, Math.trunc(limitParam))) : undefined
+  const page = Math.max(1, Math.trunc(Number(url.searchParams.get('page')) || 1))
+  const total = paginated ? await prisma.student.count({ where: { academyId: user.academyId } }) : undefined
 
   const students = await prisma.student.findMany({
     where: { academyId: user.academyId },
     orderBy: { fullName: 'asc' },
+    ...(paginated ? { skip: (page - 1) * (limit as number), take: limit } : {}),
     include: {
       class: { select: { name: true, section: true } },
       feeInvoices: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } },
@@ -44,7 +55,11 @@ export async function GET() {
     }
   })
 
-  return NextResponse.json({ students: payload, canManage: canManageAcademy(user.role) })
+  return NextResponse.json({
+    students: payload,
+    canManage: canManageAcademy(user.role),
+    ...(paginated ? { pagination: { page, limit, total, totalPages: Math.ceil((total as number) / (limit as number)) } } : {}),
+  })
 }
 
 export async function POST(request: NextRequest) {
