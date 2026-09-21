@@ -63,14 +63,17 @@ export const createStaffSchema = z.object({
   phone: zPhone.optional().nullable(),
 })
 
-// ── Attendance ───────────────────────────────────────────────────────────────
+// ── Attendance (single-record upsert) ────────────────────────────────────────
 export const markAttendanceSchema = z.object({
-  classId: zId,
+  studentId: zId,
   date: z.string().min(8, 'is required'),
-  records: z
-    .array(z.object({ studentId: zId, status: attendanceStatus }))
-    .min(1, 'at least one record is required')
-    .max(1000, 'too many records'),
+  status: attendanceStatus,
+})
+
+// ── Change password ──────────────────────────────────────────────────────────
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1, 'is required'),
+  newPassword: z.string().min(6, 'must be at least 6 characters').max(200),
 })
 
 // ── Public inquiry ───────────────────────────────────────────────────────────
@@ -78,13 +81,19 @@ export const publicInquirySchema = z.object({
   name: zNonEmpty(120),
   phone: zPhone,
   email: zEmail.optional().nullable(),
-  message: zOptionalStr(2000),
-  // honeypot — must be empty; bots fill it.
-  website: z.string().max(0, 'unexpected value').optional().or(z.literal('')),
+  message: zOptionalStr(1000),
+  studentName: zOptionalStr(120),
+  interestedClassId: zId.optional().nullable(),
+  source: zOptionalStr(40),
+  // Honeypot: accepted by the schema (any string) so a filled value is NOT
+  // rejected here — the route silently returns a fake success for bots instead
+  // of a 400 that would reveal the trap.
+  website: z.string().max(200).optional(),
 })
 
 // ── Plan upgrade request ─────────────────────────────────────────────────────
+// Accepts any valid tier; the route enforces the upgrade-only / same-tier rules.
 export const planRequestSchema = z.object({
-  requestedTier: z.enum(['BASIC', 'PRO']),
+  requestedTier: z.enum(['TRIAL', 'BASIC', 'PRO']),
   note: zOptionalStr(1000),
 })

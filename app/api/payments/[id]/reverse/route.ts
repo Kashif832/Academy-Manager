@@ -6,6 +6,8 @@ import { canManageFinance } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import { computeInvoiceStatus } from '@/lib/fees'
 import { getRequestId, jsonError, requireWritable } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { reversePaymentSchema } from '@/lib/schemas'
 
 // Reverse a payment: VOID (recorded in error) or REFUND (money returned). The
 // original FeePayment is preserved for history — its status flips and its
@@ -23,12 +25,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   const { id } = await params
-  const body = await request.json().catch(() => null)
-  const action = typeof body?.action === 'string' ? body.action.toUpperCase() : ''
-  const reason = typeof body?.reason === 'string' ? body.reason.trim().slice(0, 500) : null
-  if (action !== 'VOID' && action !== 'REFUND') {
-    return jsonError(400, "action must be 'VOID' or 'REFUND'.", requestId)
-  }
+  const parsed = await validateBody(request, reversePaymentSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const action = parsed.data.action
+  const reason = parsed.data.reason?.trim().slice(0, 500) ?? null
   const targetStatus = action === 'VOID' ? 'VOID' : 'REFUNDED'
 
   try {

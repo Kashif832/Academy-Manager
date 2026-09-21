@@ -59,18 +59,22 @@ describe('class / staff / attendance validation', () => {
     expect(createStaffSchema.safeParse({ fullName: 'T', email: 'a@b.com', password: '123', role: 'TEACHER' }).success).toBe(false)
     expect(createStaffSchema.safeParse({ fullName: 'T', email: 'a@b.com', password: 'secret1', role: 'OWNER' }).success).toBe(false)
   })
-  it('attendance requires at least one record and valid statuses', () => {
-    expect(markAttendanceSchema.safeParse({ classId: UUID, date: '2026-09-20', records: [{ studentId: UUID, status: 'PRESENT' }] }).success).toBe(true)
-    expect(markAttendanceSchema.safeParse({ classId: UUID, date: '2026-09-20', records: [] }).success).toBe(false)
-    expect(markAttendanceSchema.safeParse({ classId: UUID, date: '2026-09-20', records: [{ studentId: UUID, status: 'MAYBE' }] }).success).toBe(false)
+  it('attendance requires a valid student, date and status enum', () => {
+    expect(markAttendanceSchema.safeParse({ studentId: UUID, date: '2026-09-20', status: 'PRESENT' }).success).toBe(true)
+    expect(markAttendanceSchema.safeParse({ studentId: 'x', date: '2026-09-20', status: 'PRESENT' }).success).toBe(false)
+    expect(markAttendanceSchema.safeParse({ studentId: UUID, date: '2026-09-20', status: 'MAYBE' }).success).toBe(false)
   })
 })
 
-describe('public inquiry validation (honeypot + fields)', () => {
-  it('accepts a valid inquiry with empty honeypot', () => {
+describe('public inquiry validation (fields)', () => {
+  it('accepts a valid inquiry', () => {
     expect(publicInquirySchema.safeParse({ name: 'Parent', phone: '0300-1234567', website: '' }).success).toBe(true)
   })
-  it('rejects a filled honeypot (bot)', () => {
-    expect(publicInquirySchema.safeParse({ name: 'Parent', phone: '0300-1234567', website: 'http://spam' }).success).toBe(false)
+  it('requires a name and a valid phone', () => {
+    expect(publicInquirySchema.safeParse({ name: '', phone: '0300-1234567' }).success).toBe(false)
+    expect(publicInquirySchema.safeParse({ name: 'Parent', phone: '!!' }).success).toBe(false)
+  })
+  it('accepts a filled honeypot at the schema level (the route traps bots, not the schema)', () => {
+    expect(publicInquirySchema.safeParse({ name: 'Parent', phone: '0300-1234567', website: 'http://spam' }).success).toBe(true)
   })
 })

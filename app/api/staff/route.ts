@@ -2,12 +2,12 @@ import bcrypt from 'bcrypt'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
-import { requireWritable } from '@/lib/http'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { createStaffSchema } from '@/lib/schemas'
 import { staffLimitFor } from '@/lib/tiers'
 import { canManageAcademy } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
-
-const ASSIGNABLE_ROLES = new Set(['ADMIN', 'TEACHER', 'ACCOUNTANT'])
 
 export async function GET() {
   const user = await getSessionUser()
@@ -26,36 +26,28 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
 
-  const notWritable = requireWritable(user)
+  const notWritable = requireWritable(user, requestId)
   if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
-    return NextResponse.json({ error: 'Only owners and admins can add staff.' }, { status: 403 })
+    return jsonError(403, 'Only owners and admins can add staff.', requestId)
   }
 
-  const body = await request.json().catch(() => null)
-  const fullName = typeof body?.fullName === 'string' ? body.fullName.trim() : ''
-  const email = typeof body?.email === 'string' ? body.email.trim().toLowerCase() : ''
-  const phone = typeof body?.phone === 'string' && body.phone.trim() ? body.phone.trim() : null
-  const role = typeof body?.role === 'string' ? body.role : ''
-  const password = typeof body?.password === 'string' ? body.password : ''
-
-  if (!fullName || !email || !password) {
-    return NextResponse.json({ error: 'Name, email and password are required.' }, { status: 400 })
-  }
-  if (password.length < 6) {
-    return NextResponse.json({ error: 'Password must be at least 6 characters.' }, { status: 400 })
-  }
-  if (!ASSIGNABLE_ROLES.has(role)) {
-    return NextResponse.json({ error: 'Please choose a valid role.' }, { status: 400 })
-  }
+  const parsed = await validateBody(request, createStaffSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const fullName = parsed.data.fullName
+  const email = parsed.data.email.toLowerCase()
+  const phone = parsed.data.phone?.trim() || null
+  const role = parsed.data.role
+  const password = parsed.data.password
 
   const limit = staffLimitFor(user.academy.planTier)
   const activeCount = await prisma.user.count({ where: { academyId: user.academyId, isActive: true } })
   if (activeCount >= limit) {
-    return NextResponse.json({ error: `Your plan allows up to ${limit} staff account${limit === 1 ? '' : 's'}. Upgrade your plan to add more.` }, { status: 403 })
+    return jsonError(403, `Your plan allows up to ${limit} staff account${limit === 1 ? '' : 's'}. Upgrade your plan to add more.`, requestId)
   }
 
   const existing = await prisma.user.findUnique({ where: { email } })

@@ -2,26 +2,22 @@ import bcrypt from 'bcrypt'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser, setSessionCookie } from '@/lib/session'
-import { requireWritable } from '@/lib/http'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { changePasswordSchema } from '@/lib/schemas'
 import { logAudit } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
 
-  const notWritable = requireWritable(user)
+  const notWritable = requireWritable(user, requestId)
   if (notWritable) return notWritable
 
-  const body = await request.json().catch(() => null)
-  const currentPassword = typeof body?.currentPassword === 'string' ? body.currentPassword : ''
-  const newPassword = typeof body?.newPassword === 'string' ? body.newPassword : ''
-
-  if (!currentPassword || !newPassword) {
-    return NextResponse.json({ error: 'Current and new password are required.' }, { status: 400 })
-  }
-  if (newPassword.length < 6) {
-    return NextResponse.json({ error: 'New password must be at least 6 characters.' }, { status: 400 })
-  }
+  const parsed = await validateBody(request, changePasswordSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const { currentPassword, newPassword } = parsed.data
 
   const matches = await bcrypt.compare(currentPassword, user.passwordHash)
   if (!matches) {

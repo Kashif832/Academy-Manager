@@ -2,9 +2,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { isPremiumTier } from '@/lib/site-content'
 import { rateLimit, clientIp } from '@/lib/rate-limit'
+import { getRequestId, jsonError } from '@/lib/http'
+import { readJson, validate } from '@/lib/validation'
+import { publicInquirySchema } from '@/lib/schemas'
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
+  const requestId = getRequestId(request)
 
   // Anti-abuse: throttle public submissions per IP and per academy.
   const ip = clientIp(request)
@@ -20,33 +24,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: 'This site is not available.' }, { status: 404 })
   }
 
-  const body = await request.json().catch(() => null)
+  const body = await readJson(request)
+  if (body === null) return jsonError(400, 'Request body must be valid JSON and within size limits.', requestId)
 
-  // Honeypot: bots fill hidden fields. A filled honeypot returns a fake success
-  // so the bot believes it succeeded, without creating a record.
-  const honeypot = typeof body?.website === 'string' ? body.website.trim() : ''
+  // Honeypot: bots fill hidden fields. Checked BEFORE schema validation so a
+  // filled honeypot returns a fake success (bot believes it worked, no record,
+  // no 400 that would reveal the trap).
+  const honeypot = typeof (body as { website?: unknown }).website === 'string' ? (body as { website: string }).website.trim() : ''
   if (honeypot) {
     return NextResponse.json({ ok: true }, { status: 201 })
   }
 
-  const name = typeof body?.name === 'string' ? body.name.trim().slice(0, 120) : ''
-  const phone = typeof body?.phone === 'string' ? body.phone.trim().slice(0, 40) : ''
-  const email = typeof body?.email === 'string' && body.email.trim() ? body.email.trim().slice(0, 160) : null
-  const message = typeof body?.message === 'string' && body.message.trim() ? body.message.trim().slice(0, 1000) : null
-  const studentName = typeof body?.studentName === 'string' && body.studentName.trim() ? body.studentName.trim().slice(0, 120) : null
-  const requestedClassId = typeof body?.interestedClassId === 'string' && body.interestedClassId ? body.interestedClassId : null
-  const source = typeof body?.source === 'string' && body.source.trim() ? body.source.trim().slice(0, 40) : 'Website'
-
-  if (!name || !phone) {
-    return NextResponse.json({ error: 'Name and phone are required.' }, { status: 400 })
-  }
-  // Basic phone sanity check (digits, spaces and common separators only).
-  if (!/^[\d\s()+\-]{6,40}$/.test(phone)) {
-    return NextResponse.json({ error: 'Please enter a valid phone number.' }, { status: 400 })
-  }
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 })
-  }
+  const parsed = validate(publicInquirySchema, body, requestId)
+  if (!parsed.ok) return parsed.response
+  const name = parsed.data.name
+  const phone = parsed.data.phone
+  const email = parsed.data.email?.trim() || null
+  const message = parsed.data.message?.trim() || null
+  const studentName = parsed.data.studentName?.trim() || null
+  const requestedClassId = parsed.data.interestedClassId || null
+  const source = parsed.data.source?.trim() || 'Website'
 
   let interestedClassId: string | null = null
   if (requestedClassId) {

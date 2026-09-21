@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
-import { requireWritable } from '@/lib/http'
-
-const VALID_STATUSES = new Set(['PRESENT', 'ABSENT', 'LATE', 'EXCUSED'])
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { markAttendanceSchema } from '@/lib/schemas'
 
 function dateKeyToday() {
   const now = new Date()
@@ -53,25 +53,22 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
 
-  const notWritable = requireWritable(user)
+  const notWritable = requireWritable(user, requestId)
   if (notWritable) return notWritable
 
-  const body = await request.json().catch(() => null)
-  const studentId = typeof body?.studentId === 'string' ? body.studentId : ''
-  const dateParam = typeof body?.date === 'string' ? body.date : ''
-  const status = typeof body?.status === 'string' ? body.status : ''
+  const parsed = await validateBody(request, markAttendanceSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const { studentId, status } = parsed.data
 
-  if (!studentId || !VALID_STATUSES.has(status)) {
-    return NextResponse.json({ error: 'A student and a valid status are required.' }, { status: 400 })
-  }
-  const dayStart = parseDateKey(dateParam)
-  if (!dayStart) return NextResponse.json({ error: 'Invalid date.' }, { status: 400 })
+  const dayStart = parseDateKey(parsed.data.date)
+  if (!dayStart) return jsonError(400, 'Invalid date.', requestId)
 
   const student = await prisma.student.findFirst({ where: { id: studentId, academyId: user.academyId } })
-  if (!student) return NextResponse.json({ error: 'Student not found.' }, { status: 404 })
+  if (!student) return jsonError(404, 'Student not found.', requestId)
 
   const record = await prisma.attendanceRecord.upsert({
     where: { studentId_date: { studentId, date: dayStart } },

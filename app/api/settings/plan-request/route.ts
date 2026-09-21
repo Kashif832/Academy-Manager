@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
-import { requireWritable } from '@/lib/http'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { planRequestSchema } from '@/lib/schemas'
 import { canManageAcademy } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import { tierNumber } from '@/lib/tiers'
-
-const VALID_TIERS = new Set(['TRIAL', 'BASIC', 'PRO'])
 
 export async function GET() {
   const user = await getSessionUser()
@@ -31,27 +31,26 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
 
-  const notWritable = requireWritable(user)
+  const notWritable = requireWritable(user, requestId)
   if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
-    return NextResponse.json({ error: 'Only owners and admins can request a plan change.' }, { status: 403 })
+    return jsonError(403, 'Only owners and admins can request a plan change.', requestId)
   }
 
-  const body = await request.json().catch(() => null)
-  const requestedTier = typeof body?.requestedTier === 'string' ? body.requestedTier : ''
-  if (!VALID_TIERS.has(requestedTier)) {
-    return NextResponse.json({ error: 'Invalid plan tier.' }, { status: 400 })
-  }
+  const parsed = await validateBody(request, planRequestSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const requestedTier = parsed.data.requestedTier
 
   const currentTier = user.academy.planTier
   if (requestedTier === currentTier) {
-    return NextResponse.json({ error: 'You are already on this plan.' }, { status: 400 })
+    return jsonError(400, 'You are already on this plan.', requestId)
   }
   if (tierNumber(requestedTier) < tierNumber(currentTier)) {
-    return NextResponse.json({ error: 'Downgrades must be arranged with the Academy Manager administrator directly.' }, { status: 400 })
+    return jsonError(400, 'Downgrades must be arranged with the Academy Manager administrator directly.', requestId)
   }
 
   const existingPending = await prisma.planUpgradeRequest.findFirst({
