@@ -5,7 +5,7 @@ import { getSessionUser } from '@/lib/session'
 import { canManageFinance } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import { computeInvoiceStatus } from '@/lib/fees'
-import { getRequestId, jsonError } from '@/lib/http'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
 
 // Reverse a payment: VOID (recorded in error) or REFUND (money returned). The
 // original FeePayment is preserved for history — its status flips and its
@@ -15,6 +15,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const requestId = getRequestId(request)
   const user = await getSessionUser()
   if (!user) return jsonError(401, 'Not authenticated.', requestId)
+
+  const notWritable = requireWritable(user, requestId)
+  if (notWritable) return notWritable
   if (!canManageFinance(user.role)) {
     return jsonError(403, 'Only owners, admins and accountants can reverse payments.', requestId)
   }

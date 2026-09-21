@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
 import { canManageAcademy } from '@/lib/permissions'
-import { getRequestId, jsonError } from '@/lib/http'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
 import { validateBody } from '@/lib/validation'
 import { createClassSchema } from '@/lib/schemas'
 import type { ElectiveSubject } from '@/lib/site-content'
@@ -45,6 +45,9 @@ export async function POST(request: NextRequest) {
   const requestId = getRequestId(request)
   const user = await getSessionUser()
   if (!user) return jsonError(401, 'Not authenticated.', requestId)
+
+  const notWritable = requireWritable(user, requestId)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
     return jsonError(403, 'Only owners and admins can add classes.', requestId)
   }

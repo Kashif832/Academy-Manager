@@ -100,4 +100,29 @@ test.describe('Super Admin impersonation lifecycle (API)', () => {
     await sa.dispose()
     await ctx.dispose()
   })
+
+  test('an INACTIVE tenant is read-only under impersonation: reads OK, writes 403', async () => {
+    const sa = await pwRequest.newContext({ baseURL: BASE })
+    expect((await sa.post('/api/super-admin/auth/login', { data: SUPER })).status()).toBe(200)
+    const tenants = await (await sa.get('/api/super-admin/tenants')).json()
+    const dormant = (tenants.tenants ?? tenants).find((t: { slug?: string; name?: string }) => (t.slug ?? '').includes('dormant') || (t.name ?? '').includes('Dormant'))
+    expect(dormant).toBeTruthy()
+    expect((await sa.post(`/api/super-admin/tenants/${dormant.id}/impersonate`)).status()).toBe(200)
+
+    // Inspection (reads) is allowed.
+    expect((await sa.get('/api/dashboard')).status()).toBe(200)
+    expect((await sa.get('/api/students')).status()).toBe(200)
+
+    // Any write is rejected while the tenant is inactive — the tenant is frozen.
+    const cls = (await (await sa.get('/api/classes')).json()).classes?.[0]
+    const addStudent = await sa.post('/api/students', {
+      data: { fullName: 'Frozen', parentName: 'P', parentPhone: '0300-1234567', classId: cls?.id ?? '00000000-0000-4000-8000-000000000000', monthlyFee: 1000 },
+    })
+    expect(addStudent.status()).toBe(403)
+    const addPayment = await sa.post('/api/payments', { data: { studentId: '00000000-0000-4000-8000-000000000000', month: '2026-09', amount: 100, paymentMethod: 'CASH' } })
+    expect(addPayment.status()).toBe(403)
+
+    await sa.post('/api/super-admin/impersonation/exit')
+    await sa.dispose()
+  })
 })

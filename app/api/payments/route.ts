@@ -6,7 +6,7 @@ import { getSessionUser } from '@/lib/session'
 import { canManageFinance } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
 import { computeInvoiceStatus } from '@/lib/fees'
-import { getRequestId, jsonError } from '@/lib/http'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
 import { validateBody } from '@/lib/validation'
 import { recordPaymentSchema } from '@/lib/schemas'
 
@@ -16,6 +16,9 @@ export async function POST(request: NextRequest) {
   const requestId = getRequestId(request)
   const user = await getSessionUser()
   if (!user) return jsonError(401, 'Not authenticated.', requestId)
+
+  const notWritable = requireWritable(user, requestId)
+  if (notWritable) return notWritable
   // Financial operation — owners, admins and accountants only.
   if (!canManageFinance(user.role)) {
     return jsonError(403, 'Only owners, admins and accountants can record payments.', requestId)

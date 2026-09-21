@@ -86,7 +86,8 @@ export async function getSessionUser() {
         user.academy &&
         user.academy.status === 'ACTIVE'
       ) {
-        return Object.assign(user, { isImpersonation: false as const })
+        // A normal, active tenant session can always read and write.
+        return Object.assign(user, { isImpersonation: false as const, readOnly: false as const })
       }
     }
   }
@@ -109,6 +110,10 @@ export async function getSessionUser() {
         isImpersonation: true as const,
         impersonationSuperAdminId: imp.superAdminId,
         impersonationSessionId: imp.sessionId,
+        // An INACTIVE tenant is frozen: a Super Admin may impersonate it to
+        // INSPECT and reactivate, but not to create/modify/delete data. Writes
+        // are rejected while the tenant is inactive (see requireWritable).
+        readOnly: actingUser.academy.status !== 'ACTIVE',
       })
     }
   }

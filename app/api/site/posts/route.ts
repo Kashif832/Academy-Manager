@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 import { canManageAcademy } from '@/lib/permissions'
 
 const VALID_TYPES = new Set(['NEWS', 'EVENT'])
@@ -20,6 +21,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
     return NextResponse.json({ error: 'Only owners and admins can publish website content.' }, { status: 403 })
   }

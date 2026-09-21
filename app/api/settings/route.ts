@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 import { canManageAcademy } from '@/lib/permissions'
 import { hasReportsAccess, hasWebsiteAccess, staffLimitFor, tierLabel } from '@/lib/tiers'
 import { logAudit } from '@/lib/audit'
@@ -74,6 +75,9 @@ const SECTION_VALIDATORS: Record<string, (data: any) => { data: any; error?: str
 export async function PUT(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
     return NextResponse.json({ error: 'Only owners and admins can change academy settings.' }, { status: 403 })
   }
