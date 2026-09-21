@@ -27,6 +27,9 @@ export type RateLimitResult = { ok: true } | { ok: false; retryAfterSeconds: num
 export interface RateLimitStore {
   hit(key: string, limit: number, windowMs: number): Promise<RateLimitResult>
   reset(): void
+  // Optional: resolve once the store is ready to accept commands (Redis needs
+  // to finish connecting). No-op for the in-memory store.
+  whenReady?(timeoutMs?: number): Promise<void>
 }
 
 // ─── In-process fixed-window store (default + fail-safe fallback) ────────────
@@ -75,6 +78,26 @@ class RedisStore implements RateLimitStore {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const Redis = require('ioredis')
     this.client = new Redis(url, { maxRetriesPerRequest: 2, enableOfflineQueue: false, lazyConnect: false })
+    // Swallow transient connection errors so an outage never crashes the process;
+    // hit() still rejects (→ fail-safe fallback) when the server is unreachable.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(this.client as any).on('error', () => {})
+  }
+
+  // Resolve once the connection is ready to accept commands. With
+  // enableOfflineQueue:false, a command issued before the socket is ready throws,
+  // so callers that fire immediately (e.g. tests) should await this first.
+  whenReady(timeoutMs = 8000): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const c = this.client as any
+    if (c.status === 'ready') return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('redis not ready')), timeoutMs)
+      c.once('ready', () => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
   }
 
   async hit(key: string, limit: number, windowMs: number): Promise<RateLimitResult> {

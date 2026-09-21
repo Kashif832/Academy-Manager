@@ -12,16 +12,22 @@ run('distributed rate limiting across two instances (real Redis)', () => {
   let instanceB: RateLimitStore
   const key = 'e2e:redis:' + Date.now()
 
-  beforeAll(() => {
+  beforeAll(async () => {
     // Two independent stores against the SAME Redis = two app instances.
     instanceA = createRedisStore(REDIS_URL as string)
     instanceB = createRedisStore(REDIS_URL as string)
-  })
+    // Wait for both connections to be ready before issuing commands
+    // (enableOfflineQueue:false makes early commands throw otherwise).
+    await instanceA.whenReady?.()
+    await instanceB.whenReady?.()
+  }, 20_000)
+
   afterAll(async () => {
-    // @ts-expect-error internal client cleanup for the test
-    await instanceA?.['client']?.quit?.().catch?.(() => {})
-    // @ts-expect-error internal client cleanup for the test
-    await instanceB?.['client']?.quit?.().catch?.(() => {})
+    for (const s of [instanceA, instanceB]) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const c = (s as any)?.client
+      if (c?.quit) await c.quit().catch(() => {})
+    }
   })
 
   it('enforces a shared limit across both instances', async () => {
