@@ -80,17 +80,25 @@ test.describe('Security boundaries (API within a real browser context)', () => {
 })
 
 test.describe('Super Admin impersonation lifecycle (API)', () => {
-  test('inactive tenant is reachable only via a valid Super Admin context, and exit revokes it', async () => {
-    // Normal login for an INACTIVE tenant is blocked.
-    const ctx = await pwRequest.newContext({ baseURL: BASE })
-    expect((await ctx.post('/api/auth/login', { data: DORMANT })).status()).toBe(403)
-
-    // Super Admin logs in and impersonates the inactive tenant.
+  // Log in as Super Admin, find the Dormant tenant and ENFORCE that it is
+  // inactive (so these tests don't depend on ambient seed state).
+  async function superAdminWithInactiveDormant() {
     const sa = await pwRequest.newContext({ baseURL: BASE })
     expect((await sa.post('/api/super-admin/auth/login', { data: SUPER })).status()).toBe(200)
     const tenants = await (await sa.get('/api/super-admin/tenants')).json()
     const dormant = (tenants.tenants ?? tenants).find((t: { slug?: string; name?: string }) => (t.slug ?? '').includes('dormant') || (t.name ?? '').includes('Dormant'))
     expect(dormant, 'dormant tenant present').toBeTruthy()
+    await sa.patch(`/api/super-admin/tenants/${dormant.id}`, { data: { status: 'INACTIVE' } })
+    return { sa, dormant }
+  }
+
+  test('inactive tenant is reachable only via a valid Super Admin context, and exit revokes it', async () => {
+    const { sa, dormant } = await superAdminWithInactiveDormant()
+
+    // Normal login for the INACTIVE tenant is blocked.
+    const ctx = await pwRequest.newContext({ baseURL: BASE })
+    expect((await ctx.post('/api/auth/login', { data: DORMANT })).status()).toBe(403)
+
     expect((await sa.post(`/api/super-admin/tenants/${dormant.id}/impersonate`)).status()).toBe(200)
     // Now the inactive tenant's data is reachable.
     expect((await sa.get('/api/students')).status()).toBe(200)
@@ -102,11 +110,7 @@ test.describe('Super Admin impersonation lifecycle (API)', () => {
   })
 
   test('an INACTIVE tenant is read-only under impersonation: reads OK, writes 403', async () => {
-    const sa = await pwRequest.newContext({ baseURL: BASE })
-    expect((await sa.post('/api/super-admin/auth/login', { data: SUPER })).status()).toBe(200)
-    const tenants = await (await sa.get('/api/super-admin/tenants')).json()
-    const dormant = (tenants.tenants ?? tenants).find((t: { slug?: string; name?: string }) => (t.slug ?? '').includes('dormant') || (t.name ?? '').includes('Dormant'))
-    expect(dormant).toBeTruthy()
+    const { sa, dormant } = await superAdminWithInactiveDormant()
     expect((await sa.post(`/api/super-admin/tenants/${dormant.id}/impersonate`)).status()).toBe(200)
 
     // Inspection (reads) is allowed.

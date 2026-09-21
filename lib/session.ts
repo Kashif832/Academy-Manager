@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { getActiveImpersonation } from '@/lib/super-session'
+import { cookieSecure } from '@/lib/cookies'
 
 const COOKIE_NAME = 'academy_session'
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
@@ -52,7 +53,7 @@ export async function setSessionCookie(userId: string, epoch: number = 0, ttlSec
   const store = await cookies()
   store.set(COOKIE_NAME, createSessionToken(userId, epoch, ttlSeconds), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: await cookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: ttlSeconds,

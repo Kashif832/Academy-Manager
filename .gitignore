@@ -37,3 +37,6 @@ node_modules
 /playwright-report/
 /blob-report/
 /.playwright/
+
+# Production env (compose) — never commit the filled-in file
+.env.production

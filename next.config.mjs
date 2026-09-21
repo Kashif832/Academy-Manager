@@ -17,6 +17,8 @@ const securityHeaders = [
 ]
 
 const nextConfig = {
+  // Emit a self-contained server bundle for a small production Docker image.
+  output: 'standalone',
   // X-Powered-By leaks the framework; drop it.
   poweredByHeader: false,
   images: {

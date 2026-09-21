@@ -1,0 +1,13 @@
+# Caddy reverse proxy — automatic HTTPS via Let's Encrypt for a real DOMAIN.
+# For a real domain: set DOMAIN=your.domain and ACME_EMAIL=you@example.com and
+# ensure ports 80/443 are reachable. For a local run leave DOMAIN=localhost
+# (Caddy serves a local self-signed cert).
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+	# Forwards x-forwarded-proto=https so the app issues Secure cookies.
+	reverse_proxy app:3000
+}
