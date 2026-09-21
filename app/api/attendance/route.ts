@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 
 const VALID_STATUSES = new Set(['PRESENT', 'ABSENT', 'LATE', 'EXCUSED'])
 
@@ -54,6 +55,9 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
 
   const body = await request.json().catch(() => null)
   const studentId = typeof body?.studentId === 'string' ? body.studentId : ''

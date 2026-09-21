@@ -2,6 +2,7 @@ import bcrypt from 'bcrypt'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 import { staffLimitFor } from '@/lib/tiers'
 import { canManageAcademy } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
@@ -27,6 +28,9 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
     return NextResponse.json({ error: 'Only owners and admins can add staff.' }, { status: 403 })
   }

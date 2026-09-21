@@ -90,6 +90,15 @@ class RedisStore implements RateLimitStore {
   }
 }
 
+// Factory so tests can construct an independent Redis-backed store (e.g. two
+// "instances" sharing one Redis) and verify cross-instance enforcement.
+export function createRedisStore(url: string): RateLimitStore {
+  return new RedisStore(url)
+}
+export function createInMemoryStore(): RateLimitStore {
+  return new InMemoryStore()
+}
+
 // ─── Store selection + fail-safe wrapper ─────────────────────────────────────
 let primary: RateLimitStore = process.env.REDIS_URL ? new RedisStore(process.env.REDIS_URL) : new InMemoryStore()
 const fallback = new InMemoryStore()

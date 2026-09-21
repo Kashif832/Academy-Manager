@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 import { canManageAcademy } from '@/lib/permissions'
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
     return NextResponse.json({ error: 'Only owners and admins can edit website content.' }, { status: 403 })
   }
@@ -37,6 +41,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
     return NextResponse.json({ error: 'Only owners and admins can delete website content.' }, { status: 403 })
   }

@@ -31,3 +31,12 @@ node_modules
 .pgbackup.dump
 .pgpassword
 .env.sqlite.bak
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/.playwright/
+
+# Production env (compose) — never commit the filled-in file
+.env.production

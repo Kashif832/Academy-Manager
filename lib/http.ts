@@ -9,6 +9,19 @@ export function getRequestId(request: NextRequest): string {
   return request.headers.get('x-request-id') || randomUUID()
 }
 
+// Reject a WRITE when the session is read-only (a Super Admin impersonating an
+// INACTIVE tenant). Returns a 403 response to short-circuit the handler, or
+// null when the write is allowed. Reads are never affected.
+export function requireWritable(
+  user: { readOnly?: boolean } | null,
+  requestId?: string,
+): NextResponse | null {
+  if (user?.readOnly) {
+    return jsonError(403, 'This academy is inactive. Reactivate it to add or change records.', requestId)
+  }
+  return null
+}
+
 // Consistent, safe error contract. Never leaks stack traces, SQL/Prisma
 // internals or secrets — only a caller-safe message plus the request id.
 export function jsonError(status: number, message: string, requestId?: string, extra?: Record<string, unknown>) {

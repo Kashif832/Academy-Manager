@@ -2,6 +2,7 @@ import crypto from 'crypto'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
 import { getActiveImpersonation } from '@/lib/super-session'
+import { cookieSecure } from '@/lib/cookies'
 
 const COOKIE_NAME = 'academy_session'
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7 // 7 days
@@ -52,7 +53,7 @@ export async function setSessionCookie(userId: string, epoch: number = 0, ttlSec
   const store = await cookies()
   store.set(COOKIE_NAME, createSessionToken(userId, epoch, ttlSeconds), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: await cookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: ttlSeconds,
@@ -86,7 +87,8 @@ export async function getSessionUser() {
         user.academy &&
         user.academy.status === 'ACTIVE'
       ) {
-        return Object.assign(user, { isImpersonation: false as const })
+        // A normal, active tenant session can always read and write.
+        return Object.assign(user, { isImpersonation: false as const, readOnly: false as const })
       }
     }
   }
@@ -109,6 +111,10 @@ export async function getSessionUser() {
         isImpersonation: true as const,
         impersonationSuperAdminId: imp.superAdminId,
         impersonationSessionId: imp.sessionId,
+        // An INACTIVE tenant is frozen: a Super Admin may impersonate it to
+        // INSPECT and reactivate, but not to create/modify/delete data. Writes
+        // are rejected while the tenant is inactive (see requireWritable).
+        readOnly: actingUser.academy.status !== 'ACTIVE',
       })
     }
   }

@@ -88,6 +88,14 @@ enum PaymentStatus {
   REFUNDED
 }
 
+// Enrollment lifecycle within an academic year.
+enum EnrollmentStatus {
+  ACTIVE
+  TRANSFERRED
+  COMPLETED
+  WITHDRAWN
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model Academy {
@@ -129,6 +137,8 @@ model Academy {
   sitePosts         SitePost[]
   planUpgradeRequests PlanUpgradeRequest[]
   impersonationSessions ImpersonationSession[]
+  academicYears     AcademicYear[]
+  enrollments       Enrollment[]
 }
 
 model User {
@@ -192,6 +202,7 @@ model Class {
   students          Student[]
   attendanceRecords AttendanceRecord[]
   leads             SiteInquiry[]
+  enrollments       Enrollment[]
 
   @@index([academyId])
 }
@@ -216,8 +227,10 @@ model Student {
   class             Class              @relation(fields: [classId], references: [id], onDelete: Restrict)
   feeInvoices       FeeInvoice[]
   attendanceRecords AttendanceRecord[]
+  enrollments       Enrollment[]
 
   @@index([academyId])
+  @@index([academyId, fullName])
   @@index([classId])
 }
 
@@ -241,6 +254,7 @@ model FeeInvoice {
   @@unique([studentId, month])
   @@index([academyId])
   @@index([academyId, status])
+  @@index([academyId, month])
   @@index([studentId])
 }
 
@@ -274,6 +288,7 @@ model FeePayment {
   @@unique([academyId, idempotencyKey])
   @@index([academyId])
   @@index([academyId, status])
+  @@index([invoiceId, paidAt])
 }
 
 model AttendanceRecord {
@@ -389,6 +404,50 @@ model SitePost {
 // optional only for the rare platform-wide event with no single tenant
 // target (e.g. a Super Admin login); every tenant-affecting action still
 // always records it.
+// Minimal multi-year academic history. AcademicYear groups enrollments; an
+// Enrollment records that a student was in a specific class during a year.
+// Moving a student to a new class ends the current enrollment (status
+// TRANSFERRED) and opens a new one, so prior-year/class history is preserved
+// rather than overwritten. Intentionally small — not an ERP.
+model AcademicYear {
+  id        String   @id @default(uuid())
+  academyId String
+  name      String   // e.g. "2026-2027"
+  startDate DateTime @db.Date
+  endDate   DateTime @db.Date
+  isCurrent Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  academy     Academy      @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  enrollments Enrollment[]
+
+  @@unique([academyId, name])
+  @@index([academyId])
+  @@index([academyId, isCurrent])
+}
+
+model Enrollment {
+  id             String           @id @default(uuid())
+  academyId      String
+  studentId      String
+  classId        String
+  academicYearId String
+  status         EnrollmentStatus @default(ACTIVE)
+  enrolledAt     DateTime         @default(now())
+  endedAt        DateTime?
+  note           String?
+  createdAt      DateTime         @default(now())
+
+  academy      Academy      @relation(fields: [academyId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  class        Class        @relation(fields: [classId], references: [id], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+
+  @@index([academyId])
+  @@index([studentId])
+  @@index([academyId, academicYearId])
+}
+
 model AuditLog {
   id           String   @id @default(uuid())
   academyId    String?

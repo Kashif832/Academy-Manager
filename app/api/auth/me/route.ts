@@ -7,8 +7,11 @@ export async function GET() {
   if (!user) return NextResponse.json({ user: null, academy: null, impersonation: null })
 
   const ctx = await getImpersonationContext()
+  // readOnly is true when a Super Admin is impersonating an INACTIVE tenant:
+  // reads are allowed for inspection, but writes are rejected server-side.
+  const readOnly = Boolean((user as { readOnly?: boolean }).readOnly)
   const impersonation = ctx && ctx.tenantId === user.academyId
-    ? { active: true, superAdminName: ctx.superAdminName, tenantName: ctx.tenantName }
+    ? { active: true, superAdminName: ctx.superAdminName, tenantName: ctx.tenantName, readOnly }
     : null
 
   return NextResponse.json({

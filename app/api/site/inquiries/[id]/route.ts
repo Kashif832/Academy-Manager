@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 import { logAudit } from '@/lib/audit'
 
 const VALID_STATUSES = new Set(['NEW', 'CONTACTED', 'VISIT_SCHEDULED', 'APPLICATION', 'ACCEPTED', 'ENROLLED', 'LOST'])
@@ -8,6 +9,9 @@ const VALID_STATUSES = new Set(['NEW', 'CONTACTED', 'VISIT_SCHEDULED', 'APPLICAT
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
 
   const { id } = await params
   const existing = await prisma.siteInquiry.findFirst({ where: { id, academyId: user.academyId } })

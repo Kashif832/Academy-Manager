@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 import { isImpersonatingTenant } from '@/lib/super-session'
 import { defaultSiteContent, isPremiumTier, sanitizeCards, sanitizeFeatures, sanitizeTestimonials, sanitizeFaqs } from '@/lib/site-content'
 
@@ -96,6 +97,9 @@ const SITE_SECTION_VALIDATORS: Record<string, (data: any) => { data: any; error?
 export async function PUT(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
 
   if (!isPremiumTier(user.academy.planTier) && !(await isImpersonatingTenant(user.academyId))) {
     return NextResponse.json({ error: 'Upgrade to the Premium plan to edit your public site.' }, { status: 403 })

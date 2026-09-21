@@ -303,7 +303,7 @@ function AcademyManagerApp() {
   const [classActionLoading, setClassActionLoading] = useState(false)
   const [classActionError, setClassActionError] = useState('')
 
-  const [impersonation, setImpersonation] = useState<{ active: boolean; superAdminName: string; tenantName: string } | null>(null)
+  const [impersonation, setImpersonation] = useState<{ active: boolean; superAdminName: string; tenantName: string; readOnly?: boolean } | null>(null)
 
   const notify = (message: string) => { setToast(message); setTimeout(() => setToast(''), 2600) }
 
@@ -632,8 +632,8 @@ function AcademyManagerApp() {
     {mobileOpen && <div className="fixed inset-0 z-30 bg-foreground/30 lg:hidden" onClick={() => setMobileOpen(false)} />}
     <div className="lg:pl-64">
       {impersonation?.active && (
-        <div className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-2 bg-primary px-3 py-2 text-sm text-primary-foreground sm:px-4 md:px-8">
-          <span className="flex min-w-0 items-center gap-2"><ShieldCheck className="size-4 shrink-0 text-accent" /><span className="truncate">SUPER ADMIN · Managing: <b>{impersonation.tenantName}</b></span></span>
+        <div className={`sticky top-0 z-40 flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm text-primary-foreground sm:px-4 md:px-8 ${impersonation.readOnly ? 'bg-rose-700' : 'bg-primary'}`}>
+          <span className="flex min-w-0 items-center gap-2"><ShieldCheck className="size-4 shrink-0 text-accent" /><span className="truncate">SUPER ADMIN · Managing: <b>{impersonation.tenantName}</b>{impersonation.readOnly && <> · <b>Read-only</b> (tenant inactive — reactivate to make changes)</>}</span></span>
           <button onClick={handleExitImpersonation} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-primary-foreground/10 px-3 py-1.5 text-xs font-semibold hover:bg-primary-foreground/20"><ArrowLeft className="size-3.5" />Exit tenant</button>
         </div>
       )}

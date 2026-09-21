@@ -42,7 +42,7 @@ export async function GET() {
     studentsAddedThisMonth,
     feesThisMonthAgg,
     feesLastMonthAgg,
-    pendingInvoices,
+    pendingAgg,
     todaysAttendance,
     recentStudents,
     newEnrollmentsThisWeek,
@@ -63,10 +63,13 @@ export async function GET() {
       where: { academyId, paidAt: { gte: lastMonthStart, lt: thisMonthStart } },
       _sum: { amount: true },
     }),
-    prisma.feeInvoice.findMany({
-      where: { academyId, status: { in: [...UNPAID_STATUSES] } },
-      select: { amountDue: true, amountPaid: true },
-    }),
+    // Aggregate the outstanding balance in the DB instead of loading every
+    // unpaid invoice row into the app (which was O(unpaid invoices) — the
+    // dominant dashboard cost at scale).
+    prisma.$queryRaw<{ balance: number | string | null; cnt: number | bigint }[]>`
+      SELECT COALESCE(SUM("amountDue" - "amountPaid"), 0) AS balance, COUNT(*)::int AS cnt
+      FROM "FeeInvoice"
+      WHERE "academyId" = ${academyId} AND "status" IN ('PENDING', 'PARTIAL', 'OVERDUE')`,
     prisma.attendanceRecord.findMany({
       where: { academyId, date: { gte: todayStart, lt: tomorrowStart } },
       select: { status: true },
@@ -105,10 +108,8 @@ export async function GET() {
   const feesLastMonth = Number(feesLastMonthAgg._sum.amount ?? 0)
   const feesChangePct = feesLastMonth > 0 ? ((feesThisMonth - feesLastMonth) / feesLastMonth) * 100 : null
 
-  const pendingAmount = pendingInvoices.reduce(
-    (sum, invoice) => sum + (Number(invoice.amountDue) - Number(invoice.amountPaid)),
-    0,
-  )
+  const pendingAmount = Number(pendingAgg[0]?.balance ?? 0)
+  const pendingInvoiceCount = Number(pendingAgg[0]?.cnt ?? 0)
 
   // Present/absent/late/excused mirror the exact buckets the Attendance module itself
   // uses (see AttendanceModule's `counts`), so the dashboard never invents its own
@@ -208,7 +209,7 @@ export async function GET() {
       attendanceMarkedToday,
       attendanceNotMarkedToday,
       pendingAmount,
-      pendingInvoiceCount: pendingInvoices.length,
+      pendingInvoiceCount,
     },
     summary: {
       newEnrollmentsThisWeek,

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
 import { canManageAcademy } from '@/lib/permissions'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { createClassSchema } from '@/lib/schemas'
 import type { ElectiveSubject } from '@/lib/site-content'
 
 export async function GET(request: NextRequest) {
@@ -39,31 +42,27 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
+
+  const notWritable = requireWritable(user, requestId)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
-    return NextResponse.json({ error: 'Only owners and admins can add classes.' }, { status: 403 })
+    return jsonError(403, 'Only owners and admins can add classes.', requestId)
   }
 
-  const body = await request.json().catch(() => null)
-  const name = typeof body?.name === 'string' ? body.name.trim() : ''
-  const section = typeof body?.section === 'string' ? body.section.trim() : ''
-  const monthlyFee = Number(body?.monthlyFee)
-  const teacherId = typeof body?.teacherId === 'string' && body.teacherId ? body.teacherId : user.id
-
-  if (!name || !section) {
-    return NextResponse.json({ error: 'Class name and section are required.' }, { status: 400 })
-  }
-  if (!Number.isFinite(monthlyFee) || monthlyFee <= 0) {
-    return NextResponse.json({ error: 'Monthly fee must be a positive number.' }, { status: 400 })
-  }
+  const parsed = await validateBody(request, createClassSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const { name, section, monthlyFee } = parsed.data
+  const teacherId = parsed.data.teacherId || user.id
 
   const teacher = await prisma.user.findFirst({ where: { id: teacherId, academyId: user.academyId } })
-  if (!teacher) return NextResponse.json({ error: 'Selected teacher was not found.' }, { status: 400 })
+  if (!teacher) return jsonError(400, 'Selected teacher was not found.', requestId)
 
   const existing = await prisma.class.findFirst({ where: { academyId: user.academyId, name, section } })
   if (existing) {
-    return NextResponse.json({ error: 'A class with this name and section already exists.' }, { status: 400 })
+    return jsonError(400, 'A class with this name and section already exists.', requestId)
   }
 
   const cls = await prisma.class.create({

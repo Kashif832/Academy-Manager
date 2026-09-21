@@ -2,18 +2,33 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser } from '@/lib/session'
 import { canManageAcademy } from '@/lib/permissions'
+import { getRequestId, jsonError, requireWritable } from '@/lib/http'
+import { validateBody } from '@/lib/validation'
+import { createStudentSchema } from '@/lib/schemas'
+import { ensureEnrollment } from '@/lib/enrollment'
 
 function currentMonthKey(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  // Opt-in pagination: ?limit (1..200) + ?page (1-based). Without ?limit the
+  // full list is returned (backward compatible). Pagination bounds the per-
+  // student attendance/invoice sub-selects, which is the cost at large scale.
+  const url = request.nextUrl
+  const limitParam = Number(url.searchParams.get('limit'))
+  const paginated = Number.isFinite(limitParam) && limitParam > 0
+  const limit = paginated ? Math.min(200, Math.max(1, Math.trunc(limitParam))) : undefined
+  const page = Math.max(1, Math.trunc(Number(url.searchParams.get('page')) || 1))
+  const total = paginated ? await prisma.student.count({ where: { academyId: user.academyId } }) : undefined
 
   const students = await prisma.student.findMany({
     where: { academyId: user.academyId },
     orderBy: { fullName: 'asc' },
+    ...(paginated ? { skip: (page - 1) * (limit as number), take: limit } : {}),
     include: {
       class: { select: { name: true, section: true } },
       feeInvoices: { orderBy: { createdAt: 'desc' }, take: 1, select: { status: true } },
@@ -41,46 +56,42 @@ export async function GET() {
     }
   })
 
-  return NextResponse.json({ students: payload, canManage: canManageAcademy(user.role) })
+  return NextResponse.json({
+    students: payload,
+    canManage: canManageAcademy(user.role),
+    ...(paginated ? { pagination: { page, limit, total, totalPages: Math.ceil((total as number) / (limit as number)) } } : {}),
+  })
 }
 
 export async function POST(request: NextRequest) {
+  const requestId = getRequestId(request)
   const user = await getSessionUser()
-  if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+  if (!user) return jsonError(401, 'Not authenticated.', requestId)
+
+  const notWritable = requireWritable(user, requestId)
+  if (notWritable) return notWritable
   if (!canManageAcademy(user.role)) {
-    return NextResponse.json({ error: 'Only owners and admins can add students.' }, { status: 403 })
+    return jsonError(403, 'Only owners and admins can add students.', requestId)
   }
 
-  const body = await request.json().catch(() => null)
-  const fullName = typeof body?.fullName === 'string' ? body.fullName.trim() : ''
-  const parentName = typeof body?.parentName === 'string' ? body.parentName.trim() : ''
-  const parentPhone = typeof body?.parentPhone === 'string' ? body.parentPhone.trim() : ''
-  const parentEmail = typeof body?.parentEmail === 'string' && body.parentEmail.trim() ? body.parentEmail.trim() : null
-  const classId = typeof body?.classId === 'string' ? body.classId : ''
-  const monthlyFee = Number(body?.monthlyFee)
+  const parsed = await validateBody(request, createStudentSchema, requestId)
+  if (!parsed.ok) return parsed.response
+  const { fullName, parentName, parentPhone, classId, monthlyFee } = parsed.data
+  const parentEmail = parsed.data.parentEmail?.trim() || null
 
   let dateOfBirth: Date | null = null
-  if (typeof body?.dateOfBirth === 'string' && body.dateOfBirth.trim()) {
-    const parsed = new Date(body.dateOfBirth)
-    if (Number.isNaN(parsed.getTime())) {
-      return NextResponse.json({ error: 'Date of birth is not a valid date.' }, { status: 400 })
-    }
-    dateOfBirth = parsed
-  }
-
-  if (!fullName || !parentName || !parentPhone || !classId) {
-    return NextResponse.json({ error: 'Student name, parent name, parent phone and class are required.' }, { status: 400 })
-  }
-  if (!Number.isFinite(monthlyFee) || monthlyFee <= 0) {
-    return NextResponse.json({ error: 'Monthly fee must be a positive number.' }, { status: 400 })
+  if (parsed.data.dateOfBirth?.trim()) {
+    const d = new Date(parsed.data.dateOfBirth)
+    if (Number.isNaN(d.getTime())) return jsonError(400, 'Date of birth is not a valid date.', requestId)
+    dateOfBirth = d
   }
 
   const cls = await prisma.class.findFirst({ where: { id: classId, academyId: user.academyId } })
   if (!cls) {
-    return NextResponse.json({ error: 'Selected class was not found.' }, { status: 400 })
+    return jsonError(400, 'Selected class was not found.', requestId)
   }
   if (!cls.isActive) {
-    return NextResponse.json({ error: 'This class is deactivated and cannot accept new students.' }, { status: 400 })
+    return jsonError(400, 'This class is deactivated and cannot accept new students.', requestId)
   }
 
   const now = new Date()
@@ -109,6 +120,13 @@ export async function POST(request: NextRequest) {
     },
     include: { class: { select: { name: true, section: true } } },
   })
+
+  // Record the opening enrollment for academic history (best-effort, non-fatal).
+  try {
+    await ensureEnrollment(user.academyId, student.id, classId)
+  } catch {
+    /* history is supplementary — never block student creation */
+  }
 
   return NextResponse.json({
     student: {

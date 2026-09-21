@@ -2,11 +2,15 @@ import bcrypt from 'bcrypt'
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSessionUser, setSessionCookie } from '@/lib/session'
+import { requireWritable } from '@/lib/http'
 import { logAudit } from '@/lib/audit'
 
 export async function POST(request: NextRequest) {
   const user = await getSessionUser()
   if (!user) return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 })
+
+  const notWritable = requireWritable(user)
+  if (notWritable) return notWritable
 
   const body = await request.json().catch(() => null)
   const currentPassword = typeof body?.currentPassword === 'string' ? body.currentPassword : ''

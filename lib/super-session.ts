@@ -1,6 +1,7 @@
 import crypto from 'crypto'
 import { cookies } from 'next/headers'
 import { prisma } from '@/lib/prisma'
+import { cookieSecure } from '@/lib/cookies'
 
 // Deliberately separate cookie from the tenant session (lib/session.ts) so a
 // Super Admin session can never be confused with — or reused as — a tenant
@@ -57,7 +58,7 @@ export async function setSuperAdminSessionCookie(superAdminId: string) {
   const store = await cookies()
   store.set(COOKIE_NAME, createSuperAdminSessionToken(superAdminId), {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: await cookieSecure(),
     sameSite: 'lax',
     path: '/',
     maxAge: SESSION_TTL_SECONDS,
@@ -201,7 +202,7 @@ export async function startImpersonation(opts: {
     }),
     {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: await cookieSecure(),
       sameSite: 'lax',
       path: '/',
       maxAge: IMPERSONATION_TTL_SECONDS,
