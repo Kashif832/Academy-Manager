@@ -40,3 +40,7 @@ node_modules
 
 # Production env (compose) — never commit the filled-in file
 .env.production
+
+# Handover package: plaintext demo credentials — never push to a remote.
+# (The rest of Handover-Package/ IS committed; only the credentials are excluded.)
+Handover-Package/credentials/
